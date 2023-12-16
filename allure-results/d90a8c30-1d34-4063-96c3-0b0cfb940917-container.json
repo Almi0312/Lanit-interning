@@ -1,1 +1,0 @@
-{"uuid":"d90a8c30-1d34-4063-96c3-0b0cfb940917","name":"api.UpdateTicketTest","children":["22091d6d-3a46-46bf-bfcd-005bdfa3931b"],"befores":[{"name":"prepare","status":"passed","stage":"finished","description":"","steps":[],"attachments":[],"parameters":[],"start":1702144475950,"stop":1702144476692}],"afters":[],"start":1702144475914,"stop":1702144478982}
