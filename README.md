@@ -1,93 +1,275 @@
-# Kotik
+## Шаблон Фреймворка  для запуска автотестов
+BDD фреймворк для автотестов на Java, использующий:
+- [Selenide](https://ru.selenide.org) для тестирования Web UI
+- [Cucumber](https://cucumber.io) для написания сценариев в стиле BDD
+- [REST assured](https://rest-assured.io) для тестирования REST API
+
+## Как начать писать WEB автотесты
+## 1.  Page Objects
+В модуле ***autotest-web*** в директории ***src/main/java/pages*** находятся классы ***PageObjects***<br/>
+**1.1** Каждый ***PageObject*** должен наследоваться от класса ***WebPage***<br/>
+**1.2** Над классом необходимо проставить аннотацию *@Name(**value** = "<имя страницы>")*<br/>
+Пример:<br/>
+```java
+@Name(value = "Главная страница приложения")
+public class MainPage extends WebPage {
+
+    @Name("Слайдер")
+    private SelenideElement uuid = $(".slick-track");
+}
+```
+## 2. Степы
+**2.1** В классе со степами необходимо наследовать от класса AbstractWebSteps и конструктор класса следующим образом:<br/>
+```java
+public class WebActionSteps extends AbstractWebSteps {
+
+    public WebActionSteps(PageManager pageManager) {
+        super(pageManager);
+    }
+    // steps
+}
+```
+* ссылка ***pageManager*** хранит в себе инициализированный контекст текущей страницы, с помощью которой можно достать элемент через ***value*** аннотации  ***@Name*** элемента <br/>
+* При компиляции ссылка ***pageManager*** проинициализируется автоматически путем Dependency Injection через PicoContainer <br/>
+* Более подробно о подходе можно ознакомиться по ссылке [Cucumber PicoContainer](https://cucumber.io/docs/cucumber/state/) <br/>
 
 
 
-## Getting started
+**2.2** Пример инициализации страницы:<br/>
+Для того, чтобы получить доступ к элементу, нам необходимо перед этим проинициализировать ***PageObject*** <br/>
+**pageName** - это value аннотации **Name** класса ***PageObject*** - в нашем примере *"Google"*
+```java
+public void setPage(String pageName) {
+        WebPage page = getPage(pageName);
+        pageManager.setCurrentPage(page);
+}
+```
+**2.3** Теперь страница проинициализирована и получить доступ к элементам можно по его имени ***(value)***<br/>
+```java
+@Если("кликнуть на элемент {string}")
+public void clickOnElement(String elementName) {
+    SelenideElement element = pageManager
+                        .getCurrentPage()
+                        .getElement(elementName);
+    element.shouldBe(visible).click();
+}
+```
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+**2.4** Осуществление мягких проверок (SoftAssert)<br/>
+В конфигурации Selenide есть параметр Configuration.assertionMode, который не отрабатывает должным образом в связке с Cucumber и потому его использование в проекте не допускается.
+Для осуществления мягких проверок следует использовать класс ru.lanit.at.assertion.AssertsManager. 
+Пример использования (Проверка утверждений у SelenideElement) 
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+```java
+public static void elementContainsText(SelenideElement element, String text) {
+        element.execute(Commands.checkSoft(Condition.text(text), Duration.ofSeconds(10)));
+}
+```
 
-## Add your files
+**2.5** Расширение и изменения методов SelenideElement с помощью механизма SPI <br/>
+Если нужно изменить поведение стандартных методов SelenideElement,  это можно сделать след образом.
+В классе ru.lanit.at.utils.selenide.extensions.CustomCommands, необходимо релизовать свою логику, например код ниже, будет перед осуществлением клика, прикладывать скриншот элемента, на который будет происходить нажатие.    
+```java
+public <T> T execute(Object proxy, WebElementSource webElementSource, String methodName, @Nullable Object[] args) throws IOException {
+        if(methodName.equals("click")){
+            addAllureScreenshootElement((SelenideElement)proxy);
+        }
+        return super.execute(proxy, webElementSource, methodName, args);
+    }
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+    private void addAllureScreenshootElement(SelenideElement selenideElement){
+        AllureHelper.attachScreenShot("Клик на элементе ", selenideElement.getScreenshotAs(OutputType.BYTES));
+    }
+```
+Изменения логики формирования Page объектов, осуществляется в классе ru.lanit.at.utils.selenide.extensions.CustomSelenidePageFactory. С помощью этого класса можно расширить/изменить логику инициализации элементов. 
+
+## 3. Тесты
+
+**3.1** Написание сценариев
+```gherkin
+#language:ru
+Функционал: Поиск гугл
+  Сценарий: Открытие страницы google.com, ввод значения в поиск
+
+    * открыть браузер
+    * инициализация страницы "Google"
+    * ввести в поле "поле поиска" значение "Погода в Москве"
+    * на странице имеется элемент "результаты поиска"
+    * кликнуть на элемент "кнопка поиска"
+    * инициализация страницы "страница результатов поиска"
+    * на странице присутствует текст "Погода в Москве"
+```
+* Шаг 1 - открытие веб страницы
+* Шаг 2 - инициализация ***PageObject*** через его ***value*** аннотации ***@Name***
+* Шаг 3 - как в примере **2.3** получаем текущий элемент по его ***value*** аннотации ***@Name*** и производим действия/проверки
+
+**3.2** Сценарии из фрагментов
+Начиная с версии 1.2, фреймворк поддержиивает напиисание сценариев из фрагментов. Фрагменты должны храниться в 
+директории "fragments" в корне проекта в файлах с расширением *.feature. Каждый фрагмент должен быть выделен в отдельный
+сценарий и аннотирован @fragment
+```gherkin
+@fragment
+Сценарий: открытие виджета
+
+    * на странице имеется элемент "кнопка поиска"
+    * кликнуть на элемент "кнопка поиска"
+    * переход на страницу "Google страница результатов"
+    * на странице имеется элемент "виджет погоды"
+```  
+Чтобы использовать фрагмент, в сценарии следует добавить шаг вида 
+
+```gherkin
+ * вызвать фрагмент "открытие виджета"
+```
+Передаваемый текстовый параметр шага должен соответвовать имени сценария, содержащего фрагмент. Перед запуском тестов,
+фреймворк анализирует содержимое всех фича-файлов и заменяет шаг * вызвать фрагмент"{string}" на группу шагов из 
+соотвествующего фрагмента. 
+!IMPORTANT! 
+Чтобы функционал работал корректно, компиляцию проекта необходимо выполнять при помощи команды mvn compile. 
+Для запуска фич по отдельности через функционал или отладчик IDEA внесите измение в шаблон конфигураци Cucumber:
+Run/Debug Configurations/ Edit configurations template / Cucumber Java / Build Добавить действие Maven "compile"
+![feature](images/cucumber_compile.png)
+Для запуска фрагментов через Maven дополнительных настроек не требуется.
+
+## 4. Настройки
+В директории ***autotest-web/src/test/resources/config*** имеются примеры *config-файлов* для разных браузеров и общих настроек запуска.
+
+configuration.properties 
+```properties
+stand= названия стенда для тестирования  в классе (ru.lanit.at.utils.Stand) содержатся адреса стендов
+screen_after_step=false - необходимость прикреплять скриншот к каждому шагу
+baseUrl=https://petstore.swagger.io/v2/ - базовый url для апи запросов
+
+remoteUrl=127.0.0.1:4444 - адрес удаленного хаба/selenoid. 
+enableVNC=true - возможность отображения работы теста в браузере, переменная применима только selenoid. 
+enableVideo=true - возможность записывать видео, переменная применима только selenoid.
+enableLog=true - флаг для сохранения логов selenoid контейнера, переменная применима только selenoid.
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/alexmi031219/kotik.git
-git branch -M main
-git push -uf origin main
+
+chrome.properties 
+```properties
+webdriver.browser.size=1920x1080 - разрешение браузера
+webdriver.browser.name=chrome  - название браузера
+webdriver.timeoutSeconds=4  - таймаут ожидания состояния веб-элементов
+polling.timeoutMs=200  - периодичность опроса веб-элемента
+webdriver.version=91.0  - версия веб-драйвера
+
 ```
+Так же с помощью одноименных переменных окружения можно переопределить данные настройки<br>
+Драйвера скачиваются с помощью **WebDriverManager**, учитывайте это если находитесь в закрытом контуре
 
-## Integrate with your tools
+## Как начать писать API тесты
+### Принцип написания тестов похож на подход создания и отправки запроса в Postman
+*Шаг 1. Конфигурируем запрос с помощью шага*
+```gherkin
+* создать запрос  
+  | method | path | body | url |
+```
+Если какой то из столбцов не указан в данном шаге, то он не учитывается в запросе
+Например:
+```gherkin
+* создать запрос  
+  | method | path  | body            |  
+  | POST   | /user | createUser.json |
+ИЛИ
+* создать запрос  
+  | method | path  |      body        |  
+  | POST   | /user | {<тело запроса>} |
+ИЛИ
+* создать запрос  
+  | method |                  url                           |   
+  | GET    | https://petstore.swagger.io/v2/user/<username> |
+```
+* Можно указать ***basePath*** через одноименную системную переменную или в файле конфигурации ***configuration.properties***. Тогда вместо столбца url можно указывать просто path. И наоборот, если указать столбец url с полным url хоста и path то basePath не учитывается, даже если указан с системных переменных.
+* Тело запроса - в качестве тела можно передать в таблицу, как просто текст, так и название файла ***json***, которое будет лежать по пути ***autotest-rest/src/test/resources/json***
 
-- [ ] [Set up project integrations](https://gitlab.com/alexmi031219/kotik/-/settings/integrations)
+*Шаг 2. Добавление Headers и Query*
+```gherkin
+* добавить header  
+  | Content-Type | application/json |
+* добавить query параметры  
+  | city | Moscow |
+```
+*Шаг 3. Отправка запроса*
+```gherkin
+* отправить запрос
+```
+*Шаг 4. Проверка ответа*
+```gherkin
+* статус код 200
+```
+Если необходимо проверить тело ответа, то данные можно вытащить с помощью jsonpath. Значение сохранится в переменную из столбца 1<br/>
+```gherkin
+* извлечь данные  
+  | user_id | $.message |
+```
+Проверить извлеченные данные можно с помощью шага:
+```gherkin
+* сравнить значения  
+| ${user_id} | != | null |
+ИЛИ
+| ${user_id} | == | 1234567890 |
+ИЛИ
+| ${user_id} | > | 0 |
+ИЛИ
+| ${user_id} | < | 100 |
+ИЛИ
+| ${user_id} | содержит | qwerty123 |
+```
+### Иная информация.
+С помощью следующего шага можно сгенерить переменные для последующего использования в тесте
+```gherkin
+* сгенерировать переменные
+   | id         | 0                 |
+   | username   | EEEEEEEE          |
+   | firstName  | EEEEEEEE          |
+   | lastName   | EEEEEEEE          |
+   | email      | EEEEEEE@EEEDDD.EE |
+   | password   | DDDEEEDDDEEE      |
+```
+**R** - случайная русская буква<br/>
+**E** - случайная английская буква<br/>
+**D** - случайное число<br/>
+Другие символы в строке игнорируются и остаются неизменяемыми
+Сгенерированные значения хранятся в контексте теста. Их можно подставлять в запросы, тела запросов. Достать их можно используя синтаксис ***${username}***<br/>
 
-## Collaborate with your team
+### Запуск тестов через консоль
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+```java 
+mvn clean test  -Ddataproviderthreadcount=4  -Dscreen_after_step=false -Dtags="@authentication"
+ ``` 
+* ***-Ddataproviderthreadcount=4*** - кол-во поток выполнения, значение по умолчанию 1 поток (Изменение дефолтного кол-ва поток производится в файле src\test\resources\suite.xml)
 
-## Test and Deploy
+* ***-Dscreen_after_step=false***  - Автоматическое снятие скриншотов после каждого шага. Дефолтное значение =false (Изменение дефолтного значения производится в файле src\test\resources\config\configuration.properties)
 
-Use the built-in continuous integration in GitLab.
+* ***-Dtags="@authentication"***  - Выбор тестов с определенным тегом. Дефолтное значение отсутствует, т.е. если в запуске не указывать данный параметр то, будет запущены все фичи файлы.
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+>Тажке в командную строку можно передать любой параметр из файлов *.properties
+>Для добавление нового параметра, его нужно будет прописать в соответствующем .properties  файле и добавить соответствущий полю getter в java классе.    
 
-***
+#### Для запуска с дефолтными параметрами используется команда. 
+```java 
+mvn clean test 
+ ```
 
-# Editing this README
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Так же запустить тесты можно через плагин Cucumber (предварительно установив его в Idea), для этого необходимо открыть любой feature-файл, и кликнуть по зеленой стрелке рядом со стройкой **Функционал** или **Сценарий**<br/>
+![feature](images/run-feature.png)
 
-## Suggestions for a good README
+### Генерация отчета
+По итогу прогонов можно сгенерить _Allure отчет_, для этого необходимо в Intellij Idea кликнуть на строку **Maven** в правом верхнем углу IDE и следовать инструкции по пунктам ниже:<br/>
+В **п.1** необходимо выбрать тот модуль, в котором запускались тесты.<br/>
+![allure](images/allure.png)<br/>
+**По итогу сформируется Html страница с отчетом.**<br/>
+![allure-report](images/allure_report.png)<br/>
+**В отчете можно провалиться в каждый шаг и посмотреть информацию по нему**<br/>
+![allure-step](images/allure_report_steps.png)<br/>
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+где 
+* Зеленым цветом отмечены - успешно прошедшие тесты
+* Желтым цветом отмечены - тесты в которых есть неблокирующие дефекты
+* Серым цветом отмечены - тесты который были пропущены 
+* Красным цветом отмечены - тесты с блокирующим дефектом
 
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+**Шаги с неблокирующими дефекты** помечаются в отчете желтым цветом. По окончании теста отображается информация о всех подобных дефектах.  
